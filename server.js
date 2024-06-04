@@ -6,14 +6,14 @@ const path = require('path');
 const app = express();
 const PORT = 3000;
 const UPLOAD_DIR = './uploads';
-const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB
+const CHUNK_SIZE = 25 * 1024 * 1024; // 25MB
 
 // Multer storage configuration
 const storage = multer.memoryStorage(); // Store file in memory
 
 const upload = multer({
     storage: storage,
-    limits: { fileSize: 1 * 1024 * 1024 }, // 1MB limit per file
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit per file
 }).single('myFile');
 
 // Create upload directory if not exists
@@ -22,6 +22,16 @@ fs.ensureDirSync(UPLOAD_DIR);
 // Serve index.html
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Endpoint to list files in the upload directory
+app.get('/files', async (req, res) => {
+    try {
+        const files = await fs.readdir(UPLOAD_DIR);
+        res.status(200).json(files);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to read files', error: error.message });
+    }
 });
 
 // Upload endpoint

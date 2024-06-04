@@ -39,6 +39,26 @@
         margin-top: 20px;
         color: #333;
       }
+      .table-container {
+        max-height: 200px;
+        overflow-y: auto;
+        margin-top: 20px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 10px;
+        text-align: left;
+        border-bottom: 1px solid #ccc;
+      }
+      th {
+        background-color: #f4f4f4;
+      }
     </style>
   </head>
   <body>
@@ -50,6 +70,17 @@
       <h2>Download File</h2>
       <input type="text" id="fileNameInput" placeholder="Enter file name" />
       <button id="downloadButton" onclick="downloadFile()">Download</button>
+      <h2>Files in Upload Directory</h2>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>File Name</th>
+            </tr>
+          </thead>
+          <tbody id="fileList"></tbody>
+        </table>
+      </div>
     </div>
 
     <script>
@@ -74,6 +105,9 @@
 
           const result = await response.json();
           messageDiv.textContent = result.message;
+          if (response.ok) {
+            loadFiles();
+          }
         } catch (error) {
           messageDiv.textContent = "Upload failed.";
         }
@@ -110,6 +144,33 @@
           messageDiv.textContent = "Download failed.";
         }
       }
+
+      async function loadFiles() {
+        const fileList = document.getElementById("fileList");
+        fileList.innerHTML = "";
+
+        try {
+          const response = await fetch("/files");
+          const files = await response.json();
+
+          if (files.length === 0) {
+            fileList.innerHTML = "<tr><td>No files found</td></tr>";
+            return;
+          }
+
+          files.forEach((file) => {
+            const tr = document.createElement("tr");
+            const td = document.createElement("td");
+            td.textContent = file;
+            tr.appendChild(td);
+            fileList.appendChild(tr);
+          });
+        } catch (error) {
+          fileList.innerHTML = "<tr><td>Failed to load files</td></tr>";
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", loadFiles);
     </script>
   </body>
 </html>
