@@ -6,14 +6,14 @@ const path = require('path');
 const app = express();
 const PORT = 3000;
 const UPLOAD_DIR = './uploads';
-const CHUNK_SIZE = 1 * 1024 * 1024; // 25MB
+const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB
 
 // Multer storage configuration
 const storage = multer.memoryStorage(); // Store file in memory
 
 const upload = multer({
     storage: storage,
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit per file
+    limits: { fileSize: 1 * 1024 * 1024 }, // 1MB limit per file
 }).single('myFile');
 
 // Create upload directory if not exists
