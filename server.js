@@ -2,29 +2,27 @@ const express = require('express');
 const multer = require('multer');
 const fs = require('fs-extra');
 const path = require('path');
+const { WebSocketServer } = require('ws');
 
 const app = express();
 const PORT = 3000;
 const UPLOAD_DIR = './uploads';
-const CHUNK_SIZE = 25 * 1024 * 1024; // 25MB
+const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB
 
 // Multer storage configuration
-const storage = multer.memoryStorage(); // Store file in memory
-
-const upload = multer({
-    storage: storage,
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit per file
-}).single('myFile');
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage }).single('myFile');
 
 // Create upload directory if not exists
 fs.ensureDirSync(UPLOAD_DIR);
 
-// Serve index.html
+// WebSocket server for progress updates
+const wss = new WebSocketServer({ port: 8080 });
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Endpoint to list files in the upload directory
 app.get('/files', async (req, res) => {
     try {
         const files = await fs.readdir(UPLOAD_DIR);
@@ -34,7 +32,6 @@ app.get('/files', async (req, res) => {
     }
 });
 
-// Upload endpoint
 app.post('/upload', (req, res) => {
     upload(req, res, async (err) => {
         if (err) {
@@ -52,6 +49,7 @@ app.post('/upload', (req, res) => {
         const fileExt = path.parse(fileName).ext;
 
         try {
+            // Save chunks
             for (let i = 0; i < totalChunks; i++) {
                 const start = i * CHUNK_SIZE;
                 const end = Math.min(start + CHUNK_SIZE, buffer.length);
@@ -60,9 +58,48 @@ app.post('/upload', (req, res) => {
                 const chunkFilePath = path.join(UPLOAD_DIR, chunkFileName);
 
                 await fs.writeFile(chunkFilePath, chunk);
+
+                // Notify WebSocket clients about the progress
+                const progress = Math.round(((i + 1) / totalChunks) * 100);
+                wss.clients.forEach(client => {
+                    if (client.readyState === client.OPEN) {
+                        client.send(JSON.stringify({ progress }));
+                    }
+                });
             }
 
-            res.status(200).json({ message: 'File uploaded and chunked successfully!' });
+            // Merge chunks
+            const chunkFiles = await fs.readdir(UPLOAD_DIR);
+            const sortedChunkFiles = chunkFiles
+                .filter(file => file.startsWith(fileBaseName) && file.endsWith(fileExt))
+                .sort((a, b) => {
+                    const aIndex = parseInt(a.split('-chunk-')[1], 10);
+                    const bIndex = parseInt(b.split('-chunk-')[1], 10);
+                    return aIndex - bIndex;
+                });
+
+            const mergedFilePath = path.join(UPLOAD_DIR, fileName);
+            const writeStream = fs.createWriteStream(mergedFilePath);
+
+            for (const chunkFile of sortedChunkFiles) {
+                const chunkFilePath = path.join(UPLOAD_DIR, chunkFile);
+                const chunkStream = fs.createReadStream(chunkFilePath);
+                await new Promise((resolve, reject) => {
+                    chunkStream.pipe(writeStream, { end: false });
+                    chunkStream.on('end', resolve);
+                    chunkStream.on('error', reject);
+                });
+            }
+
+            writeStream.end();
+
+            // Remove chunks
+            for (const chunkFile of sortedChunkFiles) {
+                const chunkFilePath = path.join(UPLOAD_DIR, chunkFile);
+                await fs.remove(chunkFilePath);
+            }
+
+            res.status(200).json({ message: 'File uploaded, chunked, and merged successfully!' });
         } catch (error) {
             res.status(500).json({ message: 'Failed to process file', error: error.message });
         }
@@ -72,30 +109,19 @@ app.post('/upload', (req, res) => {
 // Download endpoint
 app.get('/download/:filename', async (req, res) => {
     const filename = req.params.filename;
-    const fileBaseName = path.parse(filename).name;
-    const fileExt = path.parse(filename).ext;
-    const files = await fs.readdir(UPLOAD_DIR);
-    const chunkFiles = files.filter(file => file.startsWith(fileBaseName) && file.endsWith(fileExt));
-    const sortedChunkFiles = chunkFiles.sort((a, b) => {
-        const aIndex = parseInt(a.split('-chunk-')[1], 10);
-        const bIndex = parseInt(b.split('-chunk-')[1], 10);
-        return aIndex - bIndex;
-    });
+    const filePath = path.join(UPLOAD_DIR, filename);
 
-    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-    res.setHeader('Content-Type', 'application/octet-stream');
-
-    for (const chunkFile of sortedChunkFiles) {
-        const chunkFilePath = path.join(UPLOAD_DIR, chunkFile);
-        const chunkStream = fs.createReadStream(chunkFilePath);
-        await new Promise((resolve, reject) => {
-            chunkStream.pipe(res, { end: false });
-            chunkStream.on('end', resolve);
-            chunkStream.on('error', reject);
+    try {
+        res.download(filePath, (err) => {
+            if (err) {
+                res.status(500).json({ message: 'Failed to download file', error: err.message });
+            } else {
+                fs.remove(filePath); // Remove file after download
+            }
         });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to download file', error: error.message });
     }
-
-    res.end();
 });
 
 app.listen(PORT, () => {

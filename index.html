@@ -19,7 +19,8 @@
         box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         border-radius: 8px;
       }
-      input[type="file"] {
+      input[type="file"],
+      input[type="text"] {
         display: block;
         margin-bottom: 20px;
       }
@@ -38,6 +39,21 @@
       #message {
         margin-top: 20px;
         color: #333;
+      }
+      #progressContainer {
+        margin-top: 20px;
+        display: none;
+      }
+      #progressBar {
+        width: 0;
+        height: 20px;
+        background-color: #28a745;
+        text-align: center;
+        color: #fff;
+        line-height: 20px;
+      }
+      #progressText {
+        margin-top: 5px;
       }
       .table-container {
         max-height: 200px;
@@ -67,6 +83,10 @@
       <input type="file" id="fileInput" />
       <button id="uploadButton" onclick="uploadFile()">Upload</button>
       <div id="message"></div>
+      <div id="progressContainer">
+        <div id="progressBar">0%</div>
+        <div id="progressText"></div>
+      </div>
       <h2>Download File</h2>
       <input type="text" id="fileNameInput" placeholder="Enter file name" />
       <button id="downloadButton" onclick="downloadFile()">Download</button>
@@ -84,10 +104,33 @@
     </div>
 
     <script>
+      // WebSocket connection for progress updates
+      const socket = new WebSocket("ws://localhost:8080"); // Ensure the WebSocket server is running on this port
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.progress) {
+          const percentComplete = Math.round(data.progress * 100);
+          document.getElementById("progressContainer").style.display = "block";
+          document.getElementById("progressBar").style.width =
+            percentComplete + "%";
+          document.getElementById("progressBar").textContent =
+            percentComplete + "%";
+          document.getElementById(
+            "progressText"
+          ).textContent = `Uploading: ${percentComplete}%`;
+        } else if (data.message) {
+          document.getElementById("message").textContent = data.message;
+        }
+      };
+
       async function uploadFile() {
         const fileInput = document.getElementById("fileInput");
         const file = fileInput.files[0];
         const messageDiv = document.getElementById("message");
+        const progressContainer = document.getElementById("progressContainer");
+        const progressBar = document.getElementById("progressBar");
+        const progressText = document.getElementById("progressText");
 
         if (!file) {
           messageDiv.textContent = "Please select a file to upload.";
@@ -97,20 +140,49 @@
         const formData = new FormData();
         formData.append("myFile", file);
 
-        try {
-          const response = await fetch("/upload", {
-            method: "POST",
-            body: formData,
-          });
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/upload", true);
 
-          const result = await response.json();
-          messageDiv.textContent = result.message;
-          if (response.ok) {
-            loadFiles();
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = Math.round(
+              (event.loaded / event.total) * 100
+            );
+            progressContainer.style.display = "block";
+            progressBar.style.width = percentComplete + "%";
+            progressBar.textContent = percentComplete + "%";
+            progressText.textContent = `Uploading: ${percentComplete}%`;
           }
-        } catch (error) {
-          messageDiv.textContent = "Upload failed.";
-        }
+        });
+
+        xhr.upload.addEventListener("load", () => {
+          progressBar.style.width = "100%";
+          progressBar.textContent = "100%";
+          progressText.textContent = "Upload complete!";
+        });
+
+        xhr.upload.addEventListener("error", () => {
+          progressText.textContent = "Upload failed.";
+        });
+
+        xhr.upload.addEventListener("abort", () => {
+          progressText.textContent = "Upload canceled.";
+        });
+
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            const result = JSON.parse(xhr.responseText);
+            messageDiv.textContent = result.message;
+            if (xhr.status === 200) {
+              loadFiles();
+            }
+          } else {
+            messageDiv.textContent = "Upload failed.";
+          }
+          progressContainer.style.display = "none";
+        };
+
+        xhr.send(formData);
       }
 
       async function downloadFile() {
